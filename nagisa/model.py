@@ -1,13 +1,3 @@
-# -*- coding:utf-8 -*-
-
-from __future__ import division, print_function, absolute_import
-
-import numpy as np
-import dynet_config
-dynet_config.set(mem=32, random_seed=1234)
-import dynet as dy
-
-
 class Model(object):
 
     def __init__(self, hp, params=None, embs=None):
@@ -78,7 +68,39 @@ class Model(object):
         # As nparray
         self.trans_array = self.trans.as_array()
 
+    def encode_ws2(self, X, train=False):
+        dy.renew_cg()
 
+        # Remove dy.parameters(...) for DyNet v.2.1
+        #w_ws = dy.parameter(self.w_ws)
+        #b_ws = dy.parameter(self.b_ws)
+        w_ws = self.w_ws
+        b_ws = self.b_ws
+
+        ipts = []
+        length = len(X[0])
+        for i in range(length):
+            uni   = X[0][i]
+            bi    = X[1][i]
+            ctype = X[2][i]
+            start = X[3][i]
+            end   = X[4][i]
+
+            vec_uni   = dy.concatenate([self.UNI[uid] for uid in uni])
+            vec_bi    = dy.concatenate([self.BI[bid] for bid in bi])
+            vec_start = dy.esum([self.WORD[sid] for sid in start])
+            vec_end   = dy.esum([self.WORD[eid] for eid in end])
+            vec_ctype = dy.concatenate([self.CTYPE[cid] for cid in ctype])
+            vec_at_i  = dy.concatenate([vec_uni, vec_bi, vec_ctype, vec_start, vec_end])
+
+            if train is True:
+                vec_at_i = dy.dropout(vec_at_i, self.dropout_rate)
+            ipts.append(vec_at_i)
+
+        bilstm_outputs = self.ws_model.transduce(ipts)
+        #print(bilstm_outputs)
+        observations   = [w_ws*h+b_ws for h in bilstm_outputs]
+        return bilstm_outputs 
     def encode_ws(self, X, train=False):
         dy.renew_cg()
 
@@ -109,6 +131,7 @@ class Model(object):
             ipts.append(vec_at_i)
 
         bilstm_outputs = self.ws_model.transduce(ipts)
+        #print(bilstm_outputs)
         observations   = [w_ws*h+b_ws for h in bilstm_outputs]
         return observations
 
