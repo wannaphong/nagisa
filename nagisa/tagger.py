@@ -1,17 +1,3 @@
-# -*- coding:utf-8 -*-
-
-from __future__ import division, print_function, absolute_import
-
-import os
-import re
-import sys
-import utils
-import nagisa.model as model
-
-base = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(base)
-
-
 class Tagger(object):
     """
     This class has a word segmentation function and a POS-tagging function for Japanese.
@@ -33,6 +19,7 @@ class Tagger(object):
         self.postags = [postag for postag in self._pos2id.keys()]
         # Load a hyper-parameter file
         self._hp = utils.load_data(hp)
+        self._prob = None
         # Construct a word segmentation model and a pos tagging model
         self._model = model.Model(self._hp, params)
 
@@ -53,6 +40,32 @@ class Tagger(object):
         else:
             self.use_noun_heuristic = False
 
+    def getprob(self):
+        return self._prob
+    def wakati2(self, text, lower=False):
+        """Word segmentation function. Return the segmented words.
+
+        args:
+            - text (str): An input sentence.
+            - lower (bool): If lower is True, all uppercase characters in a list \
+                            of the words are converted into lowercase characters.
+
+        return:
+            - words (list): A list of the words.
+        """
+        text = utils.preprocess(text)
+        lower_text = text.lower()
+        feats = utils.feature_extraction(text=lower_text,
+                                         uni2id=self._uni2id,
+                                         bi2id=self._bi2id,
+                                         dictionary=self._word2id,
+                                         window_size=self._hp['WINDOW_SIZE'])
+        obs  = self._model.encode_ws(feats)
+        obs  = [ob.npvalue() for ob in obs]
+        self._prob = [(j,list(i)) for i,j in zip(obs,text)]
+        tags = utils.np_viterbi(self._model.trans_array, obs)
+        #print(tags)
+        return self._prob
 
     def wakati(self, text, lower=False):
         """Word segmentation function. Return the segmented words.
@@ -74,10 +87,14 @@ class Tagger(object):
                                          window_size=self._hp['WINDOW_SIZE'])
         obs  = self._model.encode_ws(feats)
         obs  = [ob.npvalue() for ob in obs]
+        self._prob = [list(i) for i in obs]
+        #print(self._prob)
         tags = utils.np_viterbi(self._model.trans_array, obs)
+        #print(tags)
 
         # A word can be recognized as a single word forcibly.
         if self.pattern:
+            #print(self.pattern.finditer(text))
             for match in self.pattern.finditer(text):
                 span = match.span()
                 span_s = span[0]
@@ -176,7 +193,7 @@ class Tagger(object):
         return:
             - object : The object of the words with POS-tags.
         """
-        return self._Token(text, lower, self.wakati, self._postagging)
+        return self._Token(text, lower, self.wakati, self._postagging, prob=self.wakati2)
 
 
     def filter(self, text, lower=False, filter_postags=None):
@@ -203,7 +220,7 @@ class Tagger(object):
                 words.append(word)
                 postags.append(postag)
         return self._Token(text, lower, self.wakati, self._postagging,
-                           _words=words, _postags=postags)
+                           _words=words, _postags=postags,prob=self.wakati2)
 
 
     def extract(self, text, lower=False, extract_postags=None):
@@ -231,18 +248,21 @@ class Tagger(object):
                 words.append(word)
                 postags.append(postag)
         return self._Token(text, lower, self.wakati, self._postagging,
-                           _words=words, _postags=postags)
+                           _words=words, _postags=postags,prob=self.wakati2)
 
 
     class _Token(object):
-        def __init__(self, text, lower, wakati, postagging, _words=None, _postags=None):
+        def __init__(self, text, lower, wakati, postagging, _words=None, _postags=None,prob=None):
             self.text = text
             self.__lower = lower
             self.__words = _words
             self.__postags = _postags
             self.__wakati = wakati
             self.__postagging = postagging
-
+            self.__prob = prob
+        @property
+        def probs(self):
+            return self.__prob(self.text, self.__lower)
         @property
         def words(self):
             if self.__words is None:
